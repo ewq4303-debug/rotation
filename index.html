@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>台股類股輪動 RRG</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+TC:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/echarts/5.5.1/echarts.min.js"></script>
+<style>
+  :root{
+    --bg:#0d0f13; --panel:#14171d; --panel-2:#1b1f27; --line:#272c36;
+    --txt:#e7e9ee; --muted:#8b93a3; --faint:#5a6273;
+    --lead:#2ec27e; --impr:#3f8ff5; --weak:#f0a92b; --lag:#e2504a;
+    --mono:"IBM Plex Mono",ui-monospace,monospace;
+    --sans:"IBM Plex Sans TC",system-ui,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{background:var(--bg);color:var(--txt);font-family:var(--sans);font-weight:300;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1080px;margin:0 auto;padding:28px 22px 48px}
+  header{display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:8px 18px;border-bottom:1px solid var(--line);padding-bottom:16px}
+  h1{font-size:21px;font-weight:600;letter-spacing:.02em}
+  h1 .tag{font-family:var(--mono);font-size:12px;color:var(--faint);font-weight:400;margin-left:10px;letter-spacing:.06em}
+  .meta{font-family:var(--mono);font-size:12px;color:var(--muted);display:flex;gap:16px}
+  .meta b{color:var(--txt);font-weight:500}
+  .chips{display:flex;gap:8px;flex-wrap:wrap;margin:18px 0 6px}
+  .chip{font-family:var(--mono);font-size:12px;letter-spacing:.04em;padding:6px 12px;border:1px solid var(--line);border-radius:999px;background:var(--panel);color:var(--muted);cursor:pointer;user-select:none;transition:.15s;display:flex;align-items:center;gap:7px}
+  .chip:hover{border-color:var(--faint);color:var(--txt)}
+  .chip.on{background:var(--panel-2);color:var(--txt);border-color:var(--faint)}
+  .chip .dot{width:8px;height:8px;border-radius:50%}
+  .chip .n{color:var(--faint);font-weight:500}
+  .chip.on .n{color:var(--txt)}
+  #chart{width:100%;height:620px;margin-top:8px;background:var(--panel);border:1px solid var(--line);border-radius:14px}
+  .note{font-size:12.5px;color:var(--muted);line-height:1.7;margin-top:16px;border-left:2px solid var(--line);padding-left:14px}
+  .note code{font-family:var(--mono);color:var(--txt);font-size:12px}
+  @media(max-width:560px){#chart{height:460px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>台股類股輪動<span class="tag">RRG · RELATIVE ROTATION</span></h1>
+    <div class="meta">
+      <span>資料日 <b id="asof">—</b></span>
+      <span>視窗 <b id="pwin">—</b></span>
+      <span>基準 <b id="bench">—</b></span>
+    </div>
+  </header>
+
+  <div class="chips" id="chips"></div>
+  <div id="chart"></div>
+
+  <p class="note">
+    X 軸為相對強弱 (RS-Ratio)、Y 軸為相對動量 (RS-Momentum)，十字中心 = 基準 (100)。
+    類股通常沿 <span style="color:var(--impr)">改善</span> →
+    <span style="color:var(--lead)">領先</span> →
+    <span style="color:var(--weak)">轉弱</span> →
+    <span style="color:var(--lag)">落後</span> 順時針輪動。每條尾巴為最近數日軌跡，端點為現況。
+    點上方色塊可篩選象限或<code>只看電子</code>。
+  </p>
+</div>
+
+<script>
+const C = { 領先:getCss('--lead'), 改善:getCss('--impr'), 轉弱:getCss('--weak'), 落後:getCss('--lag') };
+const ORDER = ['領先','改善','轉弱','落後'];
+const ELECTRONIC = new Set(['晶圓代工','IC設計','矽智財IP','封裝測試','記憶體','矽晶圓材料',
+  '半導體設備','IC通路','PCB載板','被動元件','散熱','連接器線材','面板','光學鏡頭','AI伺服器','網通']);
+
+function getCss(v){ return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
+function hex2rgba(h,a){ const n=parseInt(h.replace('#',''),16); return `rgba(${n>>16&255},${n>>8&255},${n&255},${a})`; }
+
+// ── 內建示範資料（抓不到 rrg_data.json 時用，方便預覽）──
+const DEMO = {
+  as_of:"示範資料", benchmark:"追蹤universe等權平均",
+  params:{win:63,mom:21,tail:8,min_members:3},
+  sectors:[
+    demo("IC設計","領先",101.4,100.5),demo("AI伺服器","領先",102.3,101.2),
+    demo("網通","領先",101.1,100.8),demo("散熱","領先",102.0,101.6),
+    demo("半導體設備","改善",99.1,101.0),demo("矽晶圓材料","改善",98.6,100.7),
+    demo("生技醫療","改善",99.4,101.8),demo("電機機械","轉弱",100.9,99.1),
+    demo("航運","轉弱",101.3,98.6),demo("金融保險","轉弱",100.5,99.4),
+    demo("面板","落後",98.7,99.0),demo("鋼鐵","落後",99.2,98.3),
+    demo("水泥","落後",98.4,99.3),demo("封裝測試","落後",98.9,98.7),
+  ]
+};
+function demo(name,q,x,y){
+  const t=[]; let cx=x-(Math.random()*1.2+0.6), cy=y-(Math.random()*1.2+0.6);
+  for(let i=0;i<8;i++){ cx+=(x-cx)/(8-i)+(Math.random()-.5)*.18; cy+=(y-cy)/(8-i)+(Math.random()-.5)*.18;
+    t.push({date:`d-${7-i}`,x:+cx.toFixed(2),y:+cy.toFixed(2)});}
+  t[7]={date:"now",x,y};
+  return {name,members:5,quadrant:q,tail:t};
+}
+
+let RAW=null, activeQuad=null, elecOnly=false, chart=echarts.init(document.getElementById('chart'),null,{renderer:'canvas'});
+
+fetch('./rrg_data.json',{cache:'no-store'})
+  .then(r=>{ if(!r.ok) throw 0; return r.json(); })
+  .then(d=>boot(d))
+  .catch(()=>boot(DEMO));
+
+function boot(d){
+  RAW=d;
+  document.getElementById('asof').textContent=d.as_of;
+  document.getElementById('pwin').textContent=`${d.params.win}/${d.params.mom}`;
+  document.getElementById('bench').textContent=d.benchmark;
+  buildChips();
+  render();
+  window.addEventListener('resize',()=>chart.resize());
+}
+
+function counts(){ const c={領先:0,改善:0,轉弱:0,落後:0}; RAW.sectors.forEach(s=>c[s.quadrant]++); return c; }
+
+function buildChips(){
+  const c=counts(), box=document.getElementById('chips'); box.innerHTML='';
+  ORDER.forEach(q=>{
+    const el=document.createElement('div'); el.className='chip'+(activeQuad===q?' on':'');
+    el.innerHTML=`<span class="dot" style="background:${C[q]}"></span>${q}<span class="n">${c[q]}</span>`;
+    el.onclick=()=>{ activeQuad=(activeQuad===q?null:q); elecOnly=false; refresh(); };
+    box.appendChild(el);
+  });
+  const e=document.createElement('div'); e.className='chip'+(elecOnly?' on':'');
+  e.innerHTML=`只看電子<span class="n">${RAW.sectors.filter(s=>ELECTRONIC.has(s.name)).length}</span>`;
+  e.onclick=()=>{ elecOnly=!elecOnly; activeQuad=null; refresh(); };
+  box.appendChild(e);
+}
+function refresh(){ buildChips(); render(); }
+
+function visible(){
+  return RAW.sectors.filter(s=>
+    (!activeQuad||s.quadrant===activeQuad) && (!elecOnly||ELECTRONIC.has(s.name)));
+}
+
+function render(){
+  const secs=visible();
+  // 對稱座標域，讓四象限等大
+  let dev=2;
+  RAW.sectors.forEach(s=>s.tail.forEach(p=>{dev=Math.max(dev,Math.abs(p.x-100),Math.abs(p.y-100));}));
+  dev=Math.ceil((dev+0.6)*10)/10; const lo=100-dev, hi=100+dev;
+
+  const tint=q=>hex2rgba(C[q],0.07);
+  const base={ type:'scatter', data:[], silent:true, z:0,
+    markArea:{ silent:true, data:[
+      [{xAxis:100,yAxis:100,itemStyle:{color:tint('領先')}},{xAxis:hi,yAxis:hi}],
+      [{xAxis:lo,yAxis:100,itemStyle:{color:tint('改善')}},{xAxis:100,yAxis:hi}],
+      [{xAxis:100,yAxis:lo,itemStyle:{color:tint('轉弱')}},{xAxis:hi,yAxis:100}],
+      [{xAxis:lo,yAxis:lo,itemStyle:{color:tint('落後')}},{xAxis:100,yAxis:100}],
+    ]},
+    markLine:{ silent:true, symbol:'none', label:{show:false},
+      lineStyle:{color:getCss('--line'),type:'dashed',width:1},
+      data:[{xAxis:100},{yAxis:100}] }
+  };
+
+  const series=[base];
+  secs.forEach(s=>{
+    const col=C[s.quadrant], last=s.tail.length-1;
+    series.push({
+      type:'line', name:s.name, smooth:false,
+      data:s.tail.map(p=>[p.x,p.y]),
+      showSymbol:true, symbol:'circle',
+      symbolSize:(v,p)=>p.dataIndex===last?10:3.5,
+      lineStyle:{color:col,width:1.4,opacity:.5},
+      itemStyle:{color:col},
+      emphasis:{focus:'series',lineStyle:{width:2.4,opacity:1}},
+      endLabel:{show:true,formatter:s.name,color:col,fontFamily:getCss('--sans'),
+        fontSize:12,fontWeight:500,distance:6},
+      _meta:s
+    });
+  });
+
+  const lookup={}; secs.forEach(s=>lookup[s.name]=s);
+  chart.setOption({
+    backgroundColor:'transparent',
+    grid:{left:54,right:96,top:34,bottom:48},
+    graphic:[
+      qlabel('領先 LEADING','12%','9%','--lead','right','top'),
+      qlabel('改善 IMPROVING','11%','9%','--impr','left','top'),
+      qlabel('轉弱 WEAKENING','12%','11%','--weak','right','bottom'),
+      qlabel('落後 LAGGING','11%','11%','--lag','left','bottom'),
+    ],
+    tooltip:{ trigger:'item', backgroundColor:'#1b1f27', borderColor:'#2b313c',
+      textStyle:{color:'#e7e9ee',fontFamily:getCss('--mono'),fontSize:12},
+      formatter:p=>{ const s=lookup[p.seriesName]; if(!s) return '';
+        const lp=s.tail[s.tail.length-1];
+        return `<b style="color:${C[s.quadrant]}">${s.name}</b>　${s.quadrant}<br>`
+          +`RS-Ratio　${lp.x}<br>RS-Mom 　${lp.y}<br>成員　${s.members} 檔`; } },
+    xAxis:axis('RS-Ratio →',lo,hi),
+    yAxis:axis('RS-Momentum ↑',lo,hi),
+    series
+  },true);
+}
+
+function axis(name,lo,hi){
+  return { type:'value', name, min:lo, max:hi, scale:true,
+    nameTextStyle:{color:getCss('--faint'),fontFamily:getCss('--mono'),fontSize:11},
+    nameLocation:'end', nameGap:8,
+    axisLine:{show:false}, axisTick:{show:false},
+    splitLine:{lineStyle:{color:hex2rgba('#ffffff',0.03)}},
+    axisLabel:{color:getCss('--faint'),fontFamily:getCss('--mono'),fontSize:11,
+      formatter:v=>v.toFixed(0)} };
+}
+function qlabel(text,x,y,colVar,hx,vy){
+  const g={type:'text',z:1,silent:true,
+    style:{text,fill:hex2rgba(getCss(colVar),0.55),
+      font:`500 12px ${getCss('--mono')}`,letterSpacing:1}};
+  g[hx==='right'?'right':'left']=x; g[vy==='bottom'?'bottom':'top']=y;
+  return g;
+}
+</script>
+</body>
+</html>
