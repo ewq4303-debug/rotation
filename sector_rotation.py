@@ -49,19 +49,36 @@ def finmind_get(dataset, data_id=None, start_date=None, end_date=None):
 def fetch_prices(stock_ids, start_date, end_date):
     """逐檔抓收盤，回傳長表 [date, stock_id, close]。"""
     frames = []
+    empty_ct, no_close_ct = 0, 0
     for i, sid in enumerate(stock_ids, 1):
         try:
             df = finmind_get(PRICE_DATASET, data_id=sid,
                              start_date=start_date, end_date=end_date)
-            if not df.empty and "close" in df.columns:
-                sub = df[["date", "close"]].copy()
-                sub["stock_id"] = sid
-                frames.append(sub)
+            # ── 診斷：第一檔印出欄位名 ──
+            if i == 1:
+                print(f"  [debug] 第一檔 {sid} 欄位: {list(df.columns)}")
+                if not df.empty:
+                    print(f"  [debug] 第一行: {df.iloc[0].to_dict()}")
+            if df.empty:
+                empty_ct += 1; continue
+            # 自動偵測 close 欄位（不分大小寫）
+            col_map = {c.lower(): c for c in df.columns}
+            close_col = col_map.get("close")
+            if not close_col:
+                no_close_ct += 1
+                if no_close_ct == 1:
+                    print(f"  [warn] {sid} 找不到 close 欄位，有: {list(df.columns)}")
+                continue
+            sub = df[["date", close_col]].copy()
+            sub.columns = ["date", "close"]
+            sub["stock_id"] = sid
+            frames.append(sub)
         except Exception as e:
             print(f"  ! {sid} 抓取失敗：{e}", file=sys.stderr)
         time.sleep(REQUEST_SLEEP)
         if i % 25 == 0:
             print(f"  ...{i}/{len(stock_ids)}")
+    print(f"  [summary] 空回傳={empty_ct}  無close={no_close_ct}  有效={len(frames)}")
     if not frames:
         raise RuntimeError("FinMind 沒抓到任何資料，請檢查 token / 網路")
     return pd.concat(frames, ignore_index=True)
@@ -69,10 +86,13 @@ def fetch_prices(stock_ids, start_date, end_date):
 
 # ── 合成類股指數 ─────────────────────────────────────────────
 def build_price_matrix(long_df):
+    print(f"  [debug] long_df: {len(long_df)} rows, {long_df['stock_id'].nunique()} stocks")
     m = long_df.pivot_table(index="date", columns="stock_id",
                             values="close", aggfunc="last")
     m.index = pd.to_datetime(m.index)
-    return m.sort_index().astype(float)
+    m = m.sort_index().astype(float)
+    print(f"  [debug] price_matrix: {m.shape[0]} days × {m.shape[1]} stocks")
+    return m
 
 
 def synthesize(price_matrix, sector_map, min_members):
@@ -84,14 +104,21 @@ def synthesize(price_matrix, sector_map, min_members):
     for sid, sec in sector_map.items():
         if sid in rets.columns:
             groups[sec].append(sid)
+    matched = sum(len(v) for v in groups.values())
+    print(f"  [debug] sector_map 比對成功: {matched}/{len(sector_map)} 檔")
 
     levels, used = {}, {}
+    skipped = []
     for sec, sids in groups.items():
         if len(sids) < min_members:
+            skipped.append(f"{sec}({len(sids)})")
             continue
         sec_ret = rets[sids].mean(axis=1)
         levels[sec] = (1 + sec_ret.fillna(0)).cumprod() * 100
         used[sec] = len(sids)
+    print(f"  [debug] 通過門檻: {len(levels)} 類, 被濾掉: {len(skipped)} 類")
+    if skipped:
+        print(f"  [debug] 濾掉的: {', '.join(skipped[:10])}")
     return pd.DataFrame(levels), bench, used
 
 
