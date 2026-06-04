@@ -140,10 +140,21 @@ def quadrant(x, y):
 
 def build_output(sectors, bench, used):
     out = []
-    for sec in sectors.columns:
+    print(f"  [debug] sectors shape: {sectors.shape}, bench len: {len(bench)}")
+    print(f"  [debug] sectors index type: {type(sectors.index).__name__}, bench index type: {type(bench.index).__name__}")
+    for i, sec in enumerate(sectors.columns):
         x, y = compute_rrg(sectors[sec], bench)
+        valid_x, valid_y = x.notna().sum(), y.notna().sum()
+        if i == 0:
+            print(f"  [debug] 第一類 [{sec}]: x valid={valid_x}, y valid={valid_y}, total={len(x)}")
+            print(f"  [debug]   sector head: {sectors[sec].head(3).tolist()}")
+            print(f"  [debug]   bench head:  {bench.head(3).tolist()}")
+            rs = 100 * sectors[sec] / bench
+            print(f"  [debug]   rs head: {rs.head(3).tolist()}, rs NaN: {rs.isna().sum()}")
         d = pd.DataFrame({"x": x, "y": y}).dropna()
         if d.empty:
+            if i < 3:
+                print(f"  [debug] {sec}: 空！x valid={valid_x}, y valid={valid_y}")
             continue
         tail = d.tail(TAIL_DAYS)
         pts = [{"date": idx.strftime("%Y-%m-%d"),
