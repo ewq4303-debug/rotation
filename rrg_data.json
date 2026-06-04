@@ -1,0 +1,11 @@
+{
+  "as_of": "2026-06-04",
+  "benchmark": "追蹤universe等權平均",
+  "params": {
+    "win": 63,
+    "mom": 21,
+    "tail": 8,
+    "min_members": 3
+  },
+  "sectors": []
+}
