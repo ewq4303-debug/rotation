@@ -6,6 +6,7 @@
 <title>台股類股輪動 RRG</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+TC:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+console.log('[DEBUG] 頁面載入開始...');
 <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
 <style>
   :root{
@@ -99,6 +100,7 @@ fetch('./rrg_data.json',{cache:'no-store'})
   .catch(()=>boot(DEMO));
 
 function boot(d){
+  console.log('[DEBUG] boot() called with:', d.as_of, d.sectors?.length, 'sectors');
   RAW=d;
   document.getElementById('asof').textContent=d.as_of;
   document.getElementById('pwin').textContent=`${d.params.win}/${d.params.mom}`;
